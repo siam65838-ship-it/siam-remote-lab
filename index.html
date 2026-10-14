@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>গল্পের ঝুড়ি - আপনার গল্প শেয়ার করুন</title>
+    <style>
+        /* ... আপনার পুরোনো CSS কোড ... */
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- ... আপনার পুরোনো HTML বডি কোড ... -->
+
+    <!-- Firebase SDKs v9 (মডুলার ভার্সন) -->
+    <script type="module">
+        // ============================================
+        // FIREBASE CONFIGURATION - REAL-TIME DATABASE
+        // ============================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyD5vNJwYMLD45paxKlzHXHhtsN1oYVQJ4I",
+            authDomain: "golperjhuri-realtime.firebaseapp.com",
+            databaseURL: "https://golperjhuri-realtime-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "golperjhuri-realtime",
+            storageBucket: "golperjhuri-realtime.appspot.com",
+            messagingSenderId: "987654321012",
+            appId: "1:987654321012:web:abc123def456ghi789jkl"
+        };
+
+        // Firebase v9 মডুলার ইম্পোর্ট
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInWithEmailAndPassword, 
+            createUserWithEmailAndPassword, 
+            signInWithPopup, 
+            GoogleAuthProvider,
+            onAuthStateChanged 
+        } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+        import { 
+            getDatabase, 
+            ref, 
+            set, 
+            get, 
+            push, 
+            update, 
+            onValue,
+            query,
+            orderByChild,
+            limitToLast 
+        } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        // Firebase Initialize
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const database = getDatabase(app);
+
+        // গ্লোবাল ভেরিয়েবল
+        let currentUser = null;
+        let currentStoryId = null;
+        let selectedPackage = null;
+        let selectedPaymentMethod = null;
+        let currentTransactionId = null;
+        let imageBase64 = null;
+
+        // মোবাইল মেনু
+        function toggleMenu() { 
+            document.getElementById('navLinks').classList.toggle('active'); 
+        }
+        
+        // পেজ শো
+        function showPage(pageName) { 
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            document.getElementById(pageName + '-page').classList.add('active');
+            document.getElementById('navLinks').classList.remove('active');
+            window.scrollTo(0, 0);
+            
+            if (pageName === 'home') { 
+                loadStories(); 
+                updateAuthLinks();
+                loadContinueReading();
+            }
+            if (pageName === 'profile') { 
+                loadProfile(); 
+            }
+        }
+
+        // অথ পেজ শো
+        function showAuthPage() {
+            showPage('auth');
+            showLoginForm();
+        }
+
+        // লগইন ফর্ম শো
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+        }
+
+        // রেজিস্টার ফর্ম শো
+        function showRegisterForm() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+        }
+
+        // Google দিয়ে লগইন/রেজিস্টার
+        async function continueWithGoogle() {
+            try {
+                const provider = new GoogleAuthProvider();
+                const result = await signInWithPopup(auth, provider);
+                const user = result.user;
+                
+                currentUser = {
+                    uid: user.uid,
+                    displayName: user.displayName,
+                    email: user.email,
+                    photoURL: user.photoURL,
+                    isGoogle: true,
+                    isPremium: false
+                };
+                
+                // Firebase Database-এ ইউজার সেভ
+                await set(ref(database, 'users/' + user.uid), {
+                    name: user.displayName,
+                    email: user.email,
+                    joined: Date.now(),
+                    isPremium: false,
+                    lastLogin: Date.now()
+                });
+                
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                updateAuthLinks();
+                alert('Google অ্যাকাউন্ট দিয়ে লগইন সফল!');
+                showPage('home');
+            } catch (error) {
+                console.error("Google লগইন ত্রুটি:", error);
+                alert('Google লগইনে সমস্যা: ' + error.message);
+            }
+        }
+
+        // ইউজার চেক (গল্প লেখার জন্য)
+        function checkUserForWrite() {
+            const user = getCurrentUser();
+            if (!user) {
+                showAuthPage();
+                alert('গল্প লিখতে লগইন বা রেজিস্টার করুন!');
+            } else {
+                showPage('write');
+            }
+        }
+
+        // ইউজার চেক (প্রোফাইলের জন্য)
+        function checkUser(pageName) {
+            const user = getCurrentUser();
+            if (!user) {
+                showAuthPage();
+            } else {
+                showPage(pageName);
+            }
+        }
+
+        // Firebase Authentication State Listener
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                console.log("User logged in:", user.email);
+                updateAuthLinks();
+            } else {
+                console.log("User logged out");
+                updateAuthLinks();
+            }
+        });
+
+        // লোকাল স্টোরেজ থেকে ইউজার নিন
+        function getCurrentUser() {
+            const user = JSON.parse(localStorage.getItem('currentUser'));
+            if (user) {
+                currentUser = user;
+                return user;
+            }
+            return null;
+        }
+
+        // ইউজার সেট করুন
+        async function setCurrentUser(user) {
+            currentUser = user;
+            localStorage.setItem('currentUser', JSON.stringify(user));
+            
+            // Firebase-এ সেভ করুন
+            if (database) {
+                try {
+                    await set(ref(database, 'users/' + user.uid), {
+                        name: user.displayName || user.name,
+                        email: user.email,
+                        joined: Date.now(),
+                        isPremium: user.isPremium || false,
+                        lastLogin: Date.now()
+                    });
+                } catch (error) {
+                    console.error("Firebase user save error:", error);
+                }
+            }
+        }
+
+        // লগইন ফাংশন
+        async function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            if (!email || !password) {
+                alert('ইমেইল এবং পাসওয়ার্ড দিন!');
+                return;
+            }
+            
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+                
+                currentUser = {
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: user.displayName || email.split('@')[0],
+                    isPremium: false
+                };
+                
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                alert('লগইন সফল!');
+                showPage('home');
+            } catch (error) {
+                alert('লগইন ত্রুটি: ' + error.message);
+            }
+        }
+
+        // রেজিস্টার ফাংশন
+        async function register() {
+            const name = document.getElementById('regName').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const confirmPass = document.getElementById('regConfirmPass').value;
+            
+            if (!name || !email || !password) { 
+                alert('সব ফিল্ড পূরণ করুন!'); 
+                return; 
+            }
+            
+            if (password.length < 6) {
+                alert('পাসওয়ার্ড কমপক্ষে ৬ অক্ষর দীর্ঘ হতে হবে!');
+                return;
+            }
+            
+            if (password !== confirmPass) { 
+                alert('পাসওয়ার্ড মিলছে না!'); 
+                return; 
+            }
+            
+            try {
+                // Firebase-এ ইউজার তৈরি
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+                
+                // ইউজার প্রোফাইল আপডেট
+                const newUser = {
+                    uid: user.uid,
+                    name: name,
+                    email: email,
+                    displayName: name,
+                    isPremium: false,
+                    joined: Date.now()
+                };
+                
+                // Firebase Database-এ সেভ
+                await set(ref(database, 'users/' + user.uid), {
+                    name: name,
+                    email: email,
+                    joined: Date.now(),
+                    isPremium: false
+                });
+                
+                // LocalStorage-এ সেভ
+                localStorage.setItem('currentUser', JSON.stringify(newUser));
+                currentUser = newUser;
+                
+                alert('রেজিস্ট্রেশন সফল! এখন আপনি গল্প লিখতে পারবেন।');
+                showPage('home');
+                
+            } catch (error) {
+                if (error.code === 'auth/email-already-in-use') {
+                    alert('এই ইমেইল ইতিমধ্যে রেজিস্টার্ড!');
+                } else {
+                    alert('রেজিস্ট্রেশন ত্রুটি: ' + error.message);
+                }
+            }
+        }
+
+        // গল্প লোড (Firebase থেকে)
+        async function loadStories() {
+            showLoader('trendingLoader');
+            showLoader('storiesLoader');
+            
+            if (database) {
+                try {
+                    // Firebase থেকে গল্প লোড
+                    const storiesRef = ref(database, 'stories');
+                    const storiesQuery = query(storiesRef, orderByChild('timestamp'), limitToLast(50));
+                    const snapshot = await get(storiesQuery);
+                    
+                    hideLoader('trendingLoader');
+                    hideLoader('storiesLoader');
+                    
+                    const stories = [];
+                    snapshot.forEach((childSnapshot) => {
+                        const story = childSnapshot.val();
+                        stories.push({
+                            id: childSnapshot.key,
+                            ...story
+                        });
+                    });
+                    
+                    // সব গল্প দেখানো (নতুন থেকে পুরানো)
+                    displayAllStories(stories.reverse());
+                    
+                    // ট্রেন্ডিং গল্প (সবচেয়ে বেশি লাইক)
+                    const trending = [...stories].sort((a,b) => (b.likes || 0) - (a.likes || 0)).slice(0, 4);
+                    displayTrendingStories(trending);
+                    
+                    // LocalStorage-এও সেভ করুন
+                    localStorage.setItem('stories', JSON.stringify(stories));
+                    
+                    console.log(`${stories.length} টি গল্প Firebase থেকে লোড হয়েছে`);
+                    
+                    // রিয়েল-টাইম লিসেনার সেটআপ
+                    setupRealtimeListener();
+                    
+                } catch (error) {
+                    console.log("Firebase error, using localStorage:", error);
+                    loadStoriesFromLocalStorage();
+                }
+            } else {
+                loadStoriesFromLocalStorage();
+            }
+        }
+
+        // রিয়েল-টাইম লিসেনার সেটআপ
+        function setupRealtimeListener() {
+            const storiesRef = ref(database, 'stories');
+            onValue(storiesRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const firebaseStories = [];
+                    snapshot.forEach((childSnapshot) => {
+                        firebaseStories.push({
+                            id: childSnapshot.key,
+                            ...childSnapshot.val()
+                        });
+                    });
+                    
+                    // LocalStorage আপডেট
+                    localStorage.setItem('stories', JSON.stringify(firebaseStories));
+                    
+                    // UI আপডেট
+                    displayAllStories(firebaseStories.reverse());
+                    
+                    // ট্রেন্ডিং গল্প
+                    const trending = [...firebaseStories].sort((a,b) => (b.likes || 0) - (a.likes || 0)).slice(0, 4);
+                    displayTrendingStories(trending);
+                    
+                    console.log(`রিয়েলটাইম আপডেট: ${firebaseStories.length} টি গল্প`);
+                }
+            }, (error) => {
+                console.error("Firebase realtime sync error:", error);
+            });
+        }
+
+        // কমেন্ট পোস্ট ফাংশন (Firebase set() সহ)
+        async function postComment(storyId) {
+            const user = getCurrentUser();
+            if (!user) { 
+                alert('মন্তব্য করতে লগইন করুন!'); 
+                showAuthPage();
+                return; 
+            }
+            
+            const commentText = document.getElementById('commentText').value;
+            if (!commentText.trim()) { 
+                alert('মন্তব্য লিখুন!'); 
+                return; 
+            }
+            
+            const commentData = {
+                text: commentText,
+                author: user.displayName || user.name || user.email.split('@')[0],
+                userId: user.uid || user.id,
+                timestamp: Date.now(),
+                date: new Date().toLocaleDateString('bn-BD')
+            };
+            
+            try {
+                // ১. Firebase-এ কমেন্ট set() মেথড দিয়ে সেভ করুন
+                const commentsRef = ref(database, 'comments/' + storyId);
+                const newCommentRef = push(commentsRef); // নতুন key জেনারেট করবে
+                await set(newCommentRef, commentData); // Java-style set() মেথড
+                
+                // ২. গল্পের কমেন্ট কাউন্ট আপডেট
+                const storyRef = ref(database, 'stories/' + storyId);
+                const storySnapshot = await get(storyRef);
+                
+                if (storySnapshot.exists()) {
+                    const storyData = storySnapshot.val();
+                    const currentCount = storyData.commentCount || 0;
+                    
+                    // update() মেথড দিয়ে শুধু commentCount পরিবর্তন
+                    await update(storyRef, {
+                        commentCount: currentCount + 1
+                    });
+                }
+                
+                // ৩. LocalStorage আপডেট (ব্যাকআপ হিসেবে)
+                const stories = JSON.parse(localStorage.getItem('stories')) || [];
+                const storyIndex = stories.findIndex(s => s.id === storyId);
+                if (storyIndex > -1) {
+                    stories[storyIndex].commentCount = (stories[storyIndex].commentCount || 0) + 1;
+                    localStorage.setItem('stories', JSON.stringify(stories));
+                }
+                
+                // ৪. UI আপডেট
+                document.getElementById('commentText').value = '';
+                await loadComments(storyId); // কমেন্ট লিস্ট রিফ্রেশ
+                alert('মন্তব্য পোস্ট হয়েছে!');
+                
+            } catch (error) {
+                console.error("কমেন্ট পোস্ট ত্রুটি:", error);
+                alert('মন্তব্য পোস্ট করতে সমস্যা: ' + error.message);
+            }
+        }
+
+        // কমেন্ট লোড ফাংশন (Firebase থেকে)
+        async function loadComments(storyId) {
+            try {
+                const commentsRef = ref(database, 'comments/' + storyId);
+                const commentsQuery = query(commentsRef, orderByChild('timestamp'), limitToLast(20));
+                const snapshot = await get(commentsQuery);
+                
+                const commentsList = document.getElementById('commentsList');
+                if (!commentsList) return;
+                
+                if (!snapshot.exists()) {
+                    commentsList.innerHTML = '<p style="text-align: center; color: #888;">কোনো মন্তব্য নেই</p>';
+                    return;
+                }
+                
+                commentsList.innerHTML = '';
+                const comments = [];
+                
+                snapshot.forEach((childSnapshot) => {
+                    const comment = childSnapshot.val();
+                    comment.id = childSnapshot.key;
+                    comments.push(comment);
+                });
+                
+                // নতুন থেকে পুরানো সাজান
+                comments.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // UI-তে কমেন্ট শো
+                comments.forEach(comment => {
+                    const commentDiv = document.createElement('div');
+                    commentDiv.className = 'comment';
+                    commentDiv.innerHTML = `
+                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                            <div class="user-avatar" style="width: 30px; height: 30px; font-size: 14px;">
+                                ${comment.author ? comment.author.charAt(0).toUpperCase() : '?'}
+                            </div>
+                            <div>
+                                <strong>${comment.author || 'অজানা'}</strong> 
+                                <small style="color: #666;">(${comment.date || 'তারিখ নেই'})</small>
+                            </div>
+                        </div>
+                        <p style="margin: 5px 0 0 40px;">${comment.text}</p>
+                    `;
+                    commentsList.appendChild(commentDiv);
+                });
+                
+            } catch (error) {
+                console.error("কমেন্ট লোড ত্রুটি:", error);
+                const commentsList = document.getElementById('commentsList');
+                if (commentsList) {
+                    commentsList.innerHTML = '<p style="text-align: center; color: red;">কমেন্ট লোড করতে সমস্যা</p>';
+                }
+            }
+        }
+
+        // Firebase Database Rules JSON
+        const firebaseRules = {
+            "rules": {
+                "stories": {
+                    ".read": true,
+                    ".write": "auth != null"
+                },
+                "users": {
+                    "$uid": {
+                        ".read": "$uid === auth.uid",
+                        ".write": "$uid === auth.uid"
+                    }
+                },
+                "comments": {
+                    ".read": true,
+                    ".write": "auth != null"
+                },
+                "payments": {
+                    ".read": "auth != null",
+                    ".write": "auth != null"
+                }
+            }
+        };
+
+        // ... বাকি সব ফাংশন (পুরানো JS কোড থেকে) ...
+
+        // ইনিশিয়ালাইজ
+        document.addEventListener('DOMContentLoaded', function() {
+            updateAuthLinks();
+            loadStories();
+            handleURLHash();
+            
+            // URL হ্যাশ চেঞ্জ লিসেনার
+            window.addEventListener('hashchange', handleURLHash);
+        });
+
+    </script>
+</body>
+</html>
